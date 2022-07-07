@@ -2,8 +2,8 @@ package main
 
 import (
 	"fmt"
+	"github.com/chaitanyab2311/krm-fn-execution-lib/fn"
 	"io/ioutil"
-	"krm-fn-execution-lib/fn"
 )
 
 func main() {
