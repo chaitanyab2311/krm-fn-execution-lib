@@ -1,4 +1,4 @@
-module fn-execution-lib
+module krm-fn-execution-lib
 
 go 1.17
 
