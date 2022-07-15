@@ -9,7 +9,13 @@ Source File:
 
 Function call
 ```
-Execute(inputResource []byte, functionConfig string) ([]byte, error)
+executeFn := fn.ExecuteFn{
+		Input:          inputResource,
+		FunctionConfig: fnConfig,
+		Output:         &outputResource,
+	}
+
+err = executeFn.Execute()
 ```
 
 ##### Input
@@ -17,36 +23,23 @@ Execute(inputResource []byte, functionConfig string) ([]byte, error)
  | Parameter | Description |
  | --- | ----------- |
  | inputResource | Resources on which function will execute |
- | functionConfig | Path to file which contains function related configuration|
+ | fnConfig | function configuration|
  
  Example config:
  ```
- apiVersion: v1
-kind: FunctionConfig
-metadata:
-  name: fn-config1
-function:
-  image: gcr.io/kpt-fn/set-labels:v0.1
-  configMap:
-    app-name: todolist
-    env: qa
+function := fn.Function {
+            Image: "gcr.io/kpt-fn/set-labels:v0.1",
+            ConfigMap: map[string]string{
+               "env":      "dev",
+               "app-name": "my-app",
+            },
+         }
  ```
  
  ```
- apiVersion: v1
-kind: FunctionConfig
-metadata:
-  name: fn-exec-config1
-function:
-  exec: testdata/clean-metadata
+ function := fn.Function { Exec: "testdata/clean-metadata"}
  ```
   ##### Output
-```
-input, _ := ioutil.ReadFile("testdata/service.yaml")
-executeFn := fn.ExecuteFn{}
-output, err := executeFn.Execute(input, "testdata/fnconfig.yaml")
-```
-
  | Parameter | Description |
  | --- | ----------- |
  | outputResource | Transformed resources after function execution|
