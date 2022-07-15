@@ -30,7 +30,7 @@ func (e *ExecuteFn) Execute(inputResource []byte, functionConfig string) ([]byte
 	// get the functions to run
 	functions, err := e.getFunctions()
 	isExec := e.configFile.Exec != ""
-	wd, err := os.Getwd()
+	wd, err := "/opt"
 
 	err = runfn.RunFns{
 		Input:      input,
