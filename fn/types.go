@@ -4,10 +4,10 @@ import (
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
-type ConfigFile struct {
+type FunctionConfig struct {
 	yaml.ResourceMeta `yaml:",inline" json:",inline"`
 
-	Function `yaml:"function" json:"function"`
+	Functions []Function `yaml:"functions" json:"functions"`
 }
 
 // Function specifies a KRM function.

@@ -1,23 +1,44 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"fn-execution-lib/fn"
+	"io"
 	"io/ioutil"
-	"krm-fn-execution-lib/fn"
 )
 
 func main() {
-	input, err := ioutil.ReadFile("testdata/service.yaml")
+	data, err := ioutil.ReadFile("testdata/service.yaml")
 	if err != nil {
 		panic(err)
 	}
+	input := io.Reader(bytes.NewBuffer(data))
+	output := bytes.Buffer{}
 
-	executeFn := fn.ExecuteFn{}
-	output, err := executeFn.Execute(input, "testdata/fnconfig.yaml")
-	if err != nil {
-		panic(err)
-		return
+	executeFn := fn.ExecuteFn{
+		Input:          input,
+		FunctionConfig: GetFnConfig(),
+		Output:         &output,
 	}
+	if err = executeFn.Execute(); err != nil {
+		panic(err)
+	}
+	fmt.Printf("Output of command is: \n%s", output.String())
+}
 
-	fmt.Printf("Output of command is: \n%s", string(output))
+func GetFnConfig() fn.FunctionConfig {
+	functions := []fn.Function{
+		{
+			Exec: "testdata/clean-metadata",
+		},
+		{
+			Image: "gcr.io/kpt-fn/set-labels:v0.1",
+			ConfigMap: map[string]string{
+				"env":      "dev",
+				"app-name": "my-app",
+			},
+		},
+	}
+	return fn.FunctionConfig{Functions: functions}
 }

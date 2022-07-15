@@ -1,9 +1,0 @@
-apiVersion: v1
-kind: FunctionConfig
-metadata:
-  name: fn-exec-config1
-function:
-  exec: testdata/clean-metadata
-  configMap:
-    app-name: todolist
-    env: qa
