@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"fmt"
-	"fn-execution-lib/fn"
 	"io"
 	"io/ioutil"
+	"krm-fn-execution-lib/fn"
 )
 
 func main() {
