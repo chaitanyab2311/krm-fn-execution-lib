@@ -3,7 +3,7 @@ package fn
 import (
 	"bytes"
 	"fmt"
-	"io"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"os"
 	"path/filepath"
 	"sigs.k8s.io/kustomize/kyaml/errors"
@@ -12,51 +12,61 @@ import (
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
-type ExecuteFn struct {
-	Input          io.Reader
-	Output         io.Writer
-	FunctionConfig FunctionConfig
+type executeFn struct {
+	input     []*yaml.RNode
+	functions []*yaml.RNode
 }
 
-func (e *ExecuteFn) Execute() error {
-	// get the functions to run
-	functions, err := e.getFunctions()
+func (e *executeFn) Execute() ([]*yaml.RNode, error) {
+	var output []*yaml.RNode
+	out, err := e.applyFn()
 	if err != nil {
-		return err
+		return nil, errors.Wrap(err)
 	}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		return err
-	}
-
-	if e.Output == nil {
-		e.Output = io.Writer(bytes.NewBuffer([]byte{}))
-	}
-
-	err = runfn.RunFns{
-		Input:      e.Input,
-		Output:     e.Output,
-		Functions:  functions,
-		EnableExec: true,
-		WorkingDir: wd,
-		ResultsDir: wd,
-	}.Execute()
-
-	return err
+	output, err = GetRNode(out.String())
+	return output, errors.Wrap(err)
 }
 
-// getFunctions parses the explicit Functions to run.
-func (e *ExecuteFn) getFunctions() ([]*yaml.RNode, error) {
-	if len(e.FunctionConfig.Functions) == 0 {
-		return nil, fmt.Errorf("no functions to run")
+func (e *executeFn) Run() (unstructured.UnstructuredList, error) {
+	var output unstructured.UnstructuredList
+	out, err := e.applyFn()
+	if err != nil {
+		return output, errors.Wrap(err)
 	}
+	output, err = GetUnstructured(out.String())
+	return output, nil
+}
 
-	var functions []*yaml.RNode
-	for _, fn := range e.FunctionConfig.Functions {
+func (e *executeFn) addInput(input []byte) error {
+	nodes, err := GetRNode(string(input))
+	if err != nil {
+		return errors.Wrap(err)
+	}
+	e.input = append(e.input, nodes...)
+	return nil
+}
+
+func (e *executeFn) addInputs(inputs ...*yaml.RNode) error {
+	e.input = append(e.input, inputs...)
+	return nil
+}
+
+func (e *executeFn) addFunctions(functions ...Function) error {
+	functionConfig, err := getFunctionConfig(functions)
+	if err != nil {
+		return errors.Wrap(err)
+	}
+	e.functions = append(e.functions, functionConfig...)
+	return nil
+}
+
+// getFunctionsToExecute parses the explicit functions to run.
+func getFunctionConfig(functions []Function) ([]*yaml.RNode, error) {
+	var functionConfig []*yaml.RNode
+	for _, fn := range functions {
 		res, err := buildFnConfigResource(fn)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err)
 		}
 
 		// create the function spec to set as an annotation
@@ -68,7 +78,7 @@ func (e *ExecuteFn) getFunctions() ([]*yaml.RNode, error) {
 		}
 
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err)
 		}
 
 		// set the function annotation on the function config, so that it is parsed by RunFns
@@ -82,10 +92,9 @@ func (e *ExecuteFn) getFunctions() ([]*yaml.RNode, error) {
 			yaml.SetField(runtimeutil.FunctionAnnotationKey, yaml.NewScalarRNode(value))); err != nil {
 			return nil, errors.Wrap(err)
 		}
-		functions = append(functions, res)
+		functionConfig = append(functionConfig, res)
 	}
-
-	return functions, nil
+	return functionConfig, nil
 }
 
 func buildFnConfigResource(function Function) (*yaml.RNode, error) {
@@ -99,7 +108,7 @@ metadata:
 data: {}
 `)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err)
 	}
 
 	// default the function config kind to ConfigMap, this may be overridden
@@ -112,7 +121,7 @@ data: {}
 		err := dataField.PipeE(
 			yaml.FieldSetter{Name: key, Value: yaml.NewStringRNode(value), OverrideStyle: true})
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err)
 		}
 	}
 
@@ -141,7 +150,7 @@ func getFnAnnotationForExec(function Function) (*yaml.RNode, error) {
 
 func getFnAnnotationForImage(function Function) (*yaml.RNode, error) {
 	if err := ValidateFunctionImageURL(function.Image); err != nil {
-		return nil, err
+		return nil, errors.Wrap(err)
 	}
 
 	fn, err := yaml.Parse(`container: {}`)
@@ -155,4 +164,27 @@ func getFnAnnotationForImage(function Function) (*yaml.RNode, error) {
 		return nil, errors.Wrap(err)
 	}
 	return fn, nil
+}
+
+func (e *executeFn) applyFn() (bytes.Buffer, error) {
+	out := bytes.Buffer{}
+
+	wd, err := os.Getwd()
+	if err != nil {
+		return out, errors.Wrap(err)
+	}
+
+	input, err := ReadInput(e.input)
+	if err != nil {
+		return out, errors.Wrap(err)
+	}
+
+	err = runfn.RunFns{
+		Input:      input,
+		Output:     &out,
+		Functions:  e.functions,
+		EnableExec: true,
+		WorkingDir: wd,
+	}.Execute()
+	return out, errors.Wrap(err)
 }

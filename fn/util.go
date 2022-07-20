@@ -1,25 +1,99 @@
 package fn
 
 import (
+	"bytes"
 	"fmt"
-	"os"
+	"io"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"regexp"
+	"sigs.k8s.io/kustomize/kyaml/errors"
 	"sigs.k8s.io/kustomize/kyaml/kio"
+	"sigs.k8s.io/kustomize/kyaml/kio/kioutil"
+	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
+	"sigs.k8s.io/yaml"
 	"strings"
 )
 
-// WriteOutput Write the resource to the output directory.
-// If the output directory is not specified, the resource is written to stdout.
-func WriteOutput(outDir string, content string) error {
-	r := strings.NewReader(content)
-	var outputs []kio.Writer
-	if err := os.MkdirAll(outDir, 0755); err != nil {
-		return err
+var itemSeparator = "---\n"
+
+func ReadInput(input []*kyaml.RNode) (io.Reader, error) {
+	var inputResourceList []string
+	for _, r := range input {
+		str, err := r.String()
+		if err != nil {
+			return nil, errors.Wrap(err)
+		}
+		inputResourceList = append(inputResourceList, str)
 	}
-	outputs = []kio.Writer{kio.LocalPackageWriter{PackagePath: outDir}}
-	return kio.Pipeline{
-		Inputs:  []kio.Reader{&kio.ByteReader{Reader: r}},
-		Outputs: outputs}.Execute()
+	resourceList := strings.Join(inputResourceList, itemSeparator)
+	reader := io.Reader(bytes.NewBuffer([]byte(resourceList)))
+	return reader, nil
+}
+
+func GetRNode(content string) ([]*kyaml.RNode, error) {
+	items, err := cleanOutput(content)
+	if err != nil {
+		return nil, err
+	}
+
+	var nodes []*kyaml.RNode
+	for _, item := range items {
+		node, err := kyaml.Parse(item)
+		if err != nil {
+			return nil, errors.Wrap(err)
+		}
+		nodes = append(nodes, node)
+	}
+	return nodes, nil
+}
+
+func GetUnstructured(content string) (unstructured.UnstructuredList, error) {
+	var unstructuredList unstructured.UnstructuredList
+
+	items, err := cleanOutput(content)
+	if err != nil {
+		return unstructuredList, err
+	}
+
+	for _, item := range items {
+		jsonItem, err := yaml.YAMLToJSON([]byte(item))
+		if err != nil {
+			return unstructuredList, errors.Wrap(err)
+		}
+		unstructuredItem := unstructured.Unstructured{}
+		err = unstructuredItem.UnmarshalJSON(jsonItem)
+		if err != nil {
+			return unstructuredList, errors.Wrap(err)
+		}
+		unstructuredList.Items = append(unstructuredList.Items, unstructuredItem)
+	}
+
+	return unstructuredList, nil
+}
+
+func cleanOutput(content string) ([]string, error) {
+	var items []string
+	r := strings.NewReader(content)
+	out := bytes.Buffer{}
+
+	outputs := []kio.Writer{
+		&kio.ByteWriter{
+			Writer: &out,
+			ClearAnnotations: []string{
+				kioutil.IndexAnnotation, kioutil.PathAnnotation,
+				kioutil.LegacyIndexAnnotation, kioutil.LegacyPathAnnotation},
+		},
+	}
+	err := kio.Pipeline{
+		Inputs:  []kio.Reader{&kio.ByteReader{Reader: r, PreserveSeqIndent: true, WrapBareSeqNode: true}},
+		Outputs: outputs,
+	}.Execute()
+
+	if err != nil {
+		return items, err
+	}
+	items = strings.Split(out.String(), itemSeparator)
+	return items, nil
 }
 
 // ValidateFunctionImageURL validates the function name.
@@ -47,7 +121,7 @@ func ValidateFunctionImageURL(name string) error {
 
 	matched, err := regexp.MatchString(t, name)
 	if err != nil {
-		return err
+		return errors.Wrap(err)
 	}
 	if !matched {
 		return fmt.Errorf("function name %q is invalid", name)

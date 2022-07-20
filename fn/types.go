@@ -1,14 +1,9 @@
 package fn
 
 import (
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 )
-
-type FunctionConfig struct {
-	yaml.ResourceMeta `yaml:",inline" json:",inline"`
-
-	Functions []Function `yaml:"functions" json:"functions"`
-}
 
 // Function specifies a KRM function.
 type Function struct {
@@ -25,4 +20,15 @@ type Function struct {
 
 	// `ConfigMap` is a convenient way to specify a function config of kind ConfigMap.
 	ConfigMap map[string]string `yaml:"configMap,omitempty" json:"configMap,omitempty"`
+}
+
+type FunctionRunner interface {
+	Execute() ([]*yaml.RNode, error)
+	Run() (unstructured.UnstructuredList, error)
+}
+
+type RunnerBuilder interface {
+	WithInput([]byte) RunnerBuilder
+	WithFunctions(...Function) RunnerBuilder
+	Build() (FunctionRunner, error)
 }
