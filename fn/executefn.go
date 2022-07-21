@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"os"
 	"path/filepath"
 	"sigs.k8s.io/kustomize/kyaml/errors"
 	"sigs.k8s.io/kustomize/kyaml/fn/runtime/runtimeutil"
@@ -168,12 +169,12 @@ func getFnAnnotationForImage(function Function) (*yaml.RNode, error) {
 func (e *executeFn) applyFn() (bytes.Buffer, error) {
 	out := bytes.Buffer{}
 
-	//wd, err := os.Getwd()
-	//if err != nil {
-	//	return out, errors.Wrap(err)
-	//}
+	wd, err := os.Getwd()
+	if err != nil {
+		return out, errors.Wrap(err)
+	}
 
-	wd := "/opt"
+	wd = "/opt"
 
 	input, err := ReadInput(e.input)
 	if err != nil {
