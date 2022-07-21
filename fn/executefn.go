@@ -3,7 +3,6 @@ package fn
 import (
 	"bytes"
 	"fmt"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"os"
 	"path/filepath"
 	"sigs.k8s.io/kustomize/kyaml/errors"
@@ -25,16 +24,6 @@ func (e *executeFn) Execute() ([]*yaml.RNode, error) {
 	}
 	output, err = GetRNode(out.String())
 	return output, errors.Wrap(err)
-}
-
-func (e *executeFn) Run() (unstructured.UnstructuredList, error) {
-	var output unstructured.UnstructuredList
-	out, err := e.applyFn()
-	if err != nil {
-		return output, errors.Wrap(err)
-	}
-	output, err = GetUnstructured(out.String())
-	return output, nil
 }
 
 func (e *executeFn) addInput(input []byte) error {
@@ -174,7 +163,7 @@ func (e *executeFn) applyFn() (bytes.Buffer, error) {
 		return out, errors.Wrap(err)
 	}
 
-	input, err := ReadInput(e.input)
+	input, err := ReadNodeInput(e.input)
 	if err != nil {
 		return out, errors.Wrap(err)
 	}

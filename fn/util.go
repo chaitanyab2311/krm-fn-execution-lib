@@ -16,7 +16,7 @@ import (
 
 var itemSeparator = "---\n"
 
-func ReadInput(input []*kyaml.RNode) (io.Reader, error) {
+func ReadNodeInput(input []*kyaml.RNode) (io.Reader, error) {
 	var inputResourceList []string
 	for _, r := range input {
 		str, err := r.String()
@@ -24,6 +24,20 @@ func ReadInput(input []*kyaml.RNode) (io.Reader, error) {
 			return nil, errors.Wrap(err)
 		}
 		inputResourceList = append(inputResourceList, str)
+	}
+	resourceList := strings.Join(inputResourceList, itemSeparator)
+	reader := io.Reader(bytes.NewBuffer([]byte(resourceList)))
+	return reader, nil
+}
+
+func ReadUnstructuredInput(input []unstructured.Unstructured) (io.Reader, error) {
+	var inputResourceList []string
+	for _, r := range input {
+		str, err := r.MarshalJSON()
+		if err != nil {
+			return nil, errors.Wrap(err)
+		}
+		inputResourceList = append(inputResourceList, string(str))
 	}
 	resourceList := strings.Join(inputResourceList, itemSeparator)
 	reader := io.Reader(bytes.NewBuffer([]byte(resourceList)))

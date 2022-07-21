@@ -5,7 +5,7 @@ import (
 	"sigs.k8s.io/kustomize/kyaml/yaml"
 )
 
-// Function specifies a KRM function.
+// Function specifies a KRM function to run.
 type Function struct {
 	// `Image` specifies the function container image.
 	//	image: gcr.io/kpt-fn/set-labels
@@ -24,11 +24,21 @@ type Function struct {
 
 type FunctionRunner interface {
 	Execute() ([]*yaml.RNode, error)
-	Run() (unstructured.UnstructuredList, error)
 }
 
 type RunnerBuilder interface {
 	WithInput([]byte) RunnerBuilder
 	WithFunctions(...Function) RunnerBuilder
 	Build() (FunctionRunner, error)
+}
+
+type RunnerBuilderU interface {
+	WithInput([]byte) RunnerBuilderU
+	WithInputs(...unstructured.Unstructured) RunnerBuilderU
+	WithFunctions(...Function) RunnerBuilderU
+	Build() (FunctionRunnerU, error)
+}
+
+type FunctionRunnerU interface {
+	Execute() (unstructured.UnstructuredList, error)
 }
