@@ -1,4 +1,4 @@
-module krm-fn-execution-lib
+module github.com/chaitanyab2311/krm-fn-execution-lib/fn
 
 go 1.17
 
