@@ -1,10 +1,13 @@
 package fn
 
 import (
+	"bytes"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"sigs.k8s.io/kustomize/kyaml/fn/framework"
 	"sigs.k8s.io/kustomize/kyaml/fn/runtime/runtimeutil"
-	"sigs.k8s.io/kustomize/kyaml/yaml"
+	"sigs.k8s.io/yaml"
 	"strings"
 	"testing"
 )
@@ -27,7 +30,21 @@ spec:
   clusterIP: 10.109.22.148
   clusterIPs:
     - 10.109.22.148
-  internalTrafficPolicy: Cluster`
+  internalTrafficPolicy: Cluster
+  ipFamilies:
+    - IPv4
+  ipFamilyPolicy: SingleStack
+  ports:
+    - port: 80
+      protocol: TCP
+      targetPort: 80
+  selector:
+    app: guestbook
+    tier: frontend
+  sessionAffinity: None
+  type: ClusterIP
+status:
+  loadBalancer: {}`
 
 var exampleDeployment = `apiVersion: apps/v1 
 kind: Deployment
@@ -70,13 +87,8 @@ func TestExecuteFn_AddInput(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected Error: %v", err)
 	}
-	var expected []*yaml.RNode
-	item1, err := yaml.Parse(exampleService)
-	item2, err := yaml.Parse(exampleDeployment)
-	expected = append(expected, item1, item2)
-	if err != nil {
-		t.Errorf("Unexpected Error: %v", err)
-	}
+	var expected *bytes.Buffer
+	expected.WriteString(exampleService + itemSeparator + exampleDeployment)
 	assert.EqualValues(t, expected, executeFn.input)
 }
 
@@ -121,6 +133,7 @@ func TestExecuteFn_Execute(t *testing.T) {
 		},
 	}
 	err = executeFn.addFunctions(functions...)
+	err = executeFn.setExecWorkingDir("../testdata")
 	if err != nil {
 		t.Errorf("Unexpected Error: %v", err)
 	}
@@ -134,5 +147,24 @@ func TestExecuteFn_Execute(t *testing.T) {
 		"tier":     "frontend",
 		"app":      "guestbook",
 	}
-	assert.EqualValues(t, expectedLabels, rl[1].GetLabels())
+	assert.EqualValues(t, expectedLabels, rl.Items[1].(*unstructured.Unstructured).GetLabels())
+}
+
+func TestReadResultFromFile(t *testing.T) {
+	content := `- field:
+    path: spec
+  message: Error message
+  resourceRef:
+    apiVersion: v1
+    kind: Pod
+    name: bar
+    namespace: foo-ns
+  severity: error`
+
+	var result framework.Results
+	err := yaml.Unmarshal([]byte(content), &result)
+	if err != nil {
+		t.Errorf("Unexpected Error: %v", err)
+	}
+	assert.EqualValues(t, "Error message", result[0].Message)
 }

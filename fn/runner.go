@@ -1,5 +1,10 @@
 package fn
 
+import (
+	"fmt"
+	"k8s.io/apimachinery/pkg/runtime"
+)
+
 var runnerErr error
 
 type Runner struct {
@@ -12,22 +17,40 @@ func NewRunner() RunnerBuilder {
 	}
 }
 
-func (r *Runner) WithInput(input []byte) RunnerBuilder {
-	err := r.executeFn.addInput(input)
-	if err != nil {
-		runnerErr = err
-	}
+func (r Runner) WithInput(bytes []byte) RunnerBuilder {
+	err := r.executeFn.addInput(bytes)
+	appendError(err)
 	return r
 }
 
-func (r *Runner) WithFunctions(function ...Function) RunnerBuilder {
+func (r Runner) WithFunctions(function ...Function) RunnerBuilder {
 	err := r.executeFn.addFunctions(function...)
-	if err != nil {
-		runnerErr = err
-	}
+	appendError(err)
 	return r
 }
 
-func (r *Runner) Build() (FunctionRunner, error) {
+func (r Runner) WithInputs(objects ...runtime.Object) RunnerBuilder {
+	err := r.executeFn.addInputs(objects...)
+	appendError(err)
+	return r
+}
+
+func (r Runner) WhereExecWorkingDir(dir string) RunnerBuilder {
+	err := r.executeFn.setExecWorkingDir(dir)
+	appendError(err)
+	return r
+}
+
+func (r Runner) Build() (FunctionRunner, error) {
 	return &r.executeFn, runnerErr
+}
+
+func appendError(err error) {
+	if err != nil {
+		if runnerErr == nil {
+			runnerErr = err
+		} else {
+			runnerErr = fmt.Errorf("%v\n%v", runnerErr, err)
+		}
+	}
 }

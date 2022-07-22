@@ -3,86 +3,68 @@ package fn
 import (
 	"bytes"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"regexp"
 	"sigs.k8s.io/kustomize/kyaml/errors"
+	"sigs.k8s.io/kustomize/kyaml/fn/framework"
 	"sigs.k8s.io/kustomize/kyaml/kio"
 	"sigs.k8s.io/kustomize/kyaml/kio/kioutil"
-	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
 	"sigs.k8s.io/yaml"
 	"strings"
 )
 
 var itemSeparator = "---\n"
 
-func ReadNodeInput(input []*kyaml.RNode) (io.Reader, error) {
-	var inputResourceList []string
-	for _, r := range input {
-		str, err := r.String()
-		if err != nil {
-			return nil, errors.Wrap(err)
-		}
-		inputResourceList = append(inputResourceList, str)
-	}
-	resourceList := strings.Join(inputResourceList, itemSeparator)
-	reader := io.Reader(bytes.NewBuffer([]byte(resourceList)))
-	return reader, nil
-}
-
-func ReadUnstructuredInput(input []unstructured.Unstructured) (io.Reader, error) {
-	var inputResourceList []string
-	for _, r := range input {
-		str, err := r.MarshalJSON()
-		if err != nil {
-			return nil, errors.Wrap(err)
-		}
-		inputResourceList = append(inputResourceList, string(str))
-	}
-	resourceList := strings.Join(inputResourceList, itemSeparator)
-	reader := io.Reader(bytes.NewBuffer([]byte(resourceList)))
-	return reader, nil
-}
-
-func GetRNode(content string) ([]*kyaml.RNode, error) {
-	items, err := cleanOutput(content)
-	if err != nil {
-		return nil, err
-	}
-
-	var nodes []*kyaml.RNode
-	for _, item := range items {
-		node, err := kyaml.Parse(item)
-		if err != nil {
-			return nil, errors.Wrap(err)
-		}
-		nodes = append(nodes, node)
-	}
-	return nodes, nil
-}
-
-func GetUnstructured(content string) (unstructured.UnstructuredList, error) {
-	var unstructuredList unstructured.UnstructuredList
+func GetResourceList(content string, resultDir string) (ResourceList, error) {
+	var rl ResourceList
 
 	items, err := cleanOutput(content)
 	if err != nil {
-		return unstructuredList, err
+		return rl, err
 	}
 
 	for _, item := range items {
 		jsonItem, err := yaml.YAMLToJSON([]byte(item))
 		if err != nil {
-			return unstructuredList, errors.Wrap(err)
+			return rl, errors.Wrap(err)
 		}
 		unstructuredItem := unstructured.Unstructured{}
 		err = unstructuredItem.UnmarshalJSON(jsonItem)
 		if err != nil {
-			return unstructuredList, errors.Wrap(err)
+			return rl, errors.Wrap(err)
 		}
-		unstructuredList.Items = append(unstructuredList.Items, unstructuredItem)
+		rl.Items = append(rl.Items, &unstructuredItem)
 	}
 
-	return unstructuredList, nil
+	resultFiles, err := ioutil.ReadDir(resultDir)
+	if err != nil {
+		return rl, errors.Wrap(err)
+	}
+
+	for _, resultFile := range resultFiles {
+		result, err := readFile(resultDir + "/" + resultFile.Name())
+		if err != nil {
+			return rl, errors.Wrap(err)
+		}
+		rl.Results = append(rl.Results, result...)
+	}
+
+	return rl, nil
+}
+
+func readFile(file string) (framework.Results, error) {
+	result := framework.Results{}
+	content, err := ioutil.ReadFile(file)
+	if err != nil {
+		return result, errors.Wrap(err)
+	}
+
+	err = yaml.Unmarshal(content, &result)
+	if err != nil {
+		return result, errors.Wrap(err)
+	}
+	return result, nil
 }
 
 func cleanOutput(content string) ([]string, error) {

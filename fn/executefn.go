@@ -3,40 +3,80 @@ package fn
 import (
 	"bytes"
 	"fmt"
+	"io"
+	"io/ioutil"
+	"k8s.io/apimachinery/pkg/runtime"
 	"os"
 	"path/filepath"
 	"sigs.k8s.io/kustomize/kyaml/errors"
 	"sigs.k8s.io/kustomize/kyaml/fn/runtime/runtimeutil"
 	"sigs.k8s.io/kustomize/kyaml/runfn"
-	"sigs.k8s.io/kustomize/kyaml/yaml"
+	kyaml "sigs.k8s.io/kustomize/kyaml/yaml"
+	"sigs.k8s.io/yaml"
 )
 
 type executeFn struct {
-	input     []*yaml.RNode
-	functions []*yaml.RNode
+	input     *bytes.Buffer
+	functions []*kyaml.RNode
+	execDir   string
 }
 
-func (e *executeFn) Execute() ([]*yaml.RNode, error) {
-	var output []*yaml.RNode
-	out, err := e.applyFn()
-	if err != nil {
-		return nil, errors.Wrap(err)
+func (e *executeFn) Execute() (ResourceList, error) {
+	var rl ResourceList
+	out := bytes.Buffer{}
+
+	if e.execDir == "" {
+		err := e.setExecWorkingDir("")
+		if err != nil {
+			return rl, err
+		}
 	}
-	output, err = GetRNode(out.String())
-	return output, errors.Wrap(err)
+
+	resultDir, err := ioutil.TempDir("", "Result")
+	defer os.RemoveAll(resultDir) // clean up
+	if err != nil {
+		return rl, errors.Wrap(err)
+	}
+
+	input := io.Reader(e.input)
+	err = runfn.RunFns{
+		Input:      input,
+		Output:     &out,
+		Functions:  e.functions,
+		EnableExec: true,
+		ResultsDir: resultDir,
+		WorkingDir: e.execDir,
+	}.Execute()
+
+	if err != nil {
+		return rl, errors.Wrap(err)
+	}
+	rl, err = GetResourceList(out.String(), resultDir)
+	return rl, err
 }
 
-func (e *executeFn) addInput(input []byte) error {
-	nodes, err := GetRNode(string(input))
+func (e *executeFn) addInput(resource []byte) error {
+	resource, err := yaml.JSONToYAML(resource)
 	if err != nil {
 		return errors.Wrap(err)
 	}
-	e.input = append(e.input, nodes...)
-	return nil
+	if e.input == nil {
+		e.input = bytes.NewBuffer(resource)
+	} else {
+		oldInput := e.input.String() + itemSeparator + string(resource)
+		e.input = bytes.NewBufferString(oldInput)
+	}
+	return errors.Wrap(err)
 }
 
-func (e *executeFn) addInputs(inputs ...*yaml.RNode) error {
-	e.input = append(e.input, inputs...)
+func (e *executeFn) addInputs(inputs ...runtime.Object) error {
+	for _, input := range inputs {
+		value, err := yaml.Marshal(input)
+		err = e.addInput(value)
+		if err != nil {
+			return errors.Wrap(err)
+		}
+	}
 	return nil
 }
 
@@ -49,9 +89,31 @@ func (e *executeFn) addFunctions(functions ...Function) error {
 	return nil
 }
 
+func (e *executeFn) setExecWorkingDir(dir string) error {
+	if dir == "" {
+		wd, err := ioutil.TempDir("", "ExecWorkingDir")
+		if err != nil {
+			return errors.Wrap(err)
+		}
+		dir = wd
+	} else {
+		// check if the dir exists
+		wd, err := filepath.Abs(dir)
+		if err != nil {
+			return errors.Wrap(err)
+		}
+		if _, err := os.Stat(wd); os.IsNotExist(err) {
+			return errors.Errorf("%s does not exist", wd)
+		}
+		dir = wd
+	}
+	e.execDir = dir
+	return nil
+}
+
 // getFunctionsToExecute parses the explicit functions to run.
-func getFunctionConfig(functions []Function) ([]*yaml.RNode, error) {
-	var functionConfig []*yaml.RNode
+func getFunctionConfig(functions []Function) ([]*kyaml.RNode, error) {
+	var functionConfig []*kyaml.RNode
 	for _, fn := range functions {
 		res, err := buildFnConfigResource(fn)
 		if err != nil {
@@ -59,7 +121,7 @@ func getFunctionConfig(functions []Function) ([]*yaml.RNode, error) {
 		}
 
 		// create the function spec to set as an annotation
-		var fnAnnotation *yaml.RNode
+		var fnAnnotation *kyaml.RNode
 		if fn.Image != "" {
 			fnAnnotation, err = getFnAnnotationForImage(fn)
 		} else {
@@ -77,8 +139,8 @@ func getFunctionConfig(functions []Function) ([]*yaml.RNode, error) {
 		}
 
 		if err = res.PipeE(
-			yaml.LookupCreate(yaml.MappingNode, "metadata", "annotations"),
-			yaml.SetField(runtimeutil.FunctionAnnotationKey, yaml.NewScalarRNode(value))); err != nil {
+			kyaml.LookupCreate(kyaml.MappingNode, "metadata", "annotations"),
+			kyaml.SetField(runtimeutil.FunctionAnnotationKey, kyaml.NewScalarRNode(value))); err != nil {
 			return nil, errors.Wrap(err)
 		}
 		functionConfig = append(functionConfig, res)
@@ -86,12 +148,12 @@ func getFunctionConfig(functions []Function) ([]*yaml.RNode, error) {
 	return functionConfig, nil
 }
 
-func buildFnConfigResource(function Function) (*yaml.RNode, error) {
+func buildFnConfigResource(function Function) (*kyaml.RNode, error) {
 	if function.Image == "" && function.Exec == "" {
 		return nil, fmt.Errorf("function must have either image or exec, none specified")
 	}
 	// create the function config
-	rc, err := yaml.Parse(`
+	rc, err := kyaml.Parse(`
 metadata:
   name: function-input
 data: {}
@@ -105,75 +167,52 @@ data: {}
 	var version = "v1"
 
 	// populate the function config with data.
-	dataField, err := rc.Pipe(yaml.Lookup("data"))
+	dataField, err := rc.Pipe(kyaml.Lookup("data"))
 	for key, value := range function.ConfigMap {
 		err := dataField.PipeE(
-			yaml.FieldSetter{Name: key, Value: yaml.NewStringRNode(value), OverrideStyle: true})
+			kyaml.FieldSetter{Name: key, Value: kyaml.NewStringRNode(value), OverrideStyle: true})
 		if err != nil {
 			return nil, errors.Wrap(err)
 		}
 	}
 
-	if err = rc.PipeE(yaml.SetField("kind", yaml.NewScalarRNode(kind))); err != nil {
+	if err = rc.PipeE(kyaml.SetField("kind", kyaml.NewScalarRNode(kind))); err != nil {
 		return nil, errors.Wrap(err)
 	}
-	if err = rc.PipeE(yaml.SetField("apiVersion", yaml.NewScalarRNode(version))); err != nil {
+	if err = rc.PipeE(kyaml.SetField("apiVersion", kyaml.NewScalarRNode(version))); err != nil {
 		return nil, errors.Wrap(err)
 	}
 	return rc, nil
 }
 
-func getFnAnnotationForExec(function Function) (*yaml.RNode, error) {
-	fn, err := yaml.Parse(`exec: {}`)
+func getFnAnnotationForExec(function Function) (*kyaml.RNode, error) {
+	fn, err := kyaml.Parse(`exec: {}`)
 	if err != nil {
 		return nil, errors.Wrap(err)
 	}
 	path, err := filepath.Abs(function.Exec)
 	if err = fn.PipeE(
-		yaml.Lookup("exec"),
-		yaml.SetField("path", yaml.NewScalarRNode(path))); err != nil {
+		kyaml.Lookup("exec"),
+		kyaml.SetField("path", kyaml.NewScalarRNode(path))); err != nil {
 		return nil, errors.Wrap(err)
 	}
 	return fn, nil
 }
 
-func getFnAnnotationForImage(function Function) (*yaml.RNode, error) {
+func getFnAnnotationForImage(function Function) (*kyaml.RNode, error) {
 	if err := ValidateFunctionImageURL(function.Image); err != nil {
 		return nil, errors.Wrap(err)
 	}
 
-	fn, err := yaml.Parse(`container: {}`)
+	fn, err := kyaml.Parse(`container: {}`)
 	if err != nil {
 		return nil, errors.Wrap(err)
 	}
 
 	if err = fn.PipeE(
-		yaml.Lookup("container"),
-		yaml.SetField("image", yaml.NewScalarRNode(function.Image))); err != nil {
+		kyaml.Lookup("container"),
+		kyaml.SetField("image", kyaml.NewScalarRNode(function.Image))); err != nil {
 		return nil, errors.Wrap(err)
 	}
 	return fn, nil
-}
-
-func (e *executeFn) applyFn() (bytes.Buffer, error) {
-	out := bytes.Buffer{}
-
-	wd, err := os.Getwd()
-	if err != nil {
-		return out, errors.Wrap(err)
-	}
-
-	input, err := ReadNodeInput(e.input)
-	if err != nil {
-		return out, errors.Wrap(err)
-	}
-
-	err = runfn.RunFns{
-		Input:      input,
-		Output:     &out,
-		Functions:  e.functions,
-		EnableExec: true,
-		WorkingDir: wd,
-	}.Execute()
-	return out, errors.Wrap(err)
 }

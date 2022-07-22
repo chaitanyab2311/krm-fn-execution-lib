@@ -7,44 +7,6 @@ import (
 	"testing"
 )
 
-func TestExecuteFnRunner(t *testing.T) {
-	fnRunner, err := getFnRunner()
-	if err != nil {
-		t.Errorf("Unexpected Error: %v", err)
-	}
-	OutRl, err := fnRunner.Execute()
-	if err != nil {
-		t.Errorf("Unexpected Error: %v", err)
-	}
-	expectedLabels := map[string]string{
-		"app-name": "my-app",
-		"env":      "dev",
-		"tier":     "frontend",
-		"app":      "guestbook",
-	}
-	assert.EqualValues(t, expectedLabels, OutRl[1].GetLabels())
-}
-
-func getFnRunner() (FunctionRunner, error) {
-	functions := []Function{
-		{
-			Exec: "../testdata/clean-metadata",
-		},
-		{
-			Image: "gcr.io/kpt-fn/set-labels:v0.1",
-			ConfigMap: map[string]string{
-				"env":      "dev",
-				"app-name": "my-app",
-			},
-		},
-	}
-	runner := NewRunner().WithInput([]byte(exampleService)).
-		WithInput([]byte(exampleDeployment)).
-		WithFunctions(functions...)
-
-	return runner.Build()
-}
-
 func TestRunFnRunner(t *testing.T) {
 	functions := []Function{
 		{
@@ -58,30 +20,35 @@ func TestRunFnRunner(t *testing.T) {
 			},
 		},
 	}
-	input := unstructured.Unstructured{}
+
+	temp := unstructured.Unstructured{}
 	jsonValue, err := yaml.YAMLToJSON([]byte(exampleService))
-	err = input.UnmarshalJSON(jsonValue)
+	err = temp.UnmarshalJSON(jsonValue)
 	if err != nil {
 		t.Errorf("Unexpected Error: %v", err)
 	}
-	runner := NewRunnerU().
-		WithInputs(input).
+
+	runner := NewRunner().
+		WithInputs(&temp).
 		WithInput([]byte(exampleDeployment)).
-		WithFunctions(functions...)
+		WithFunctions(functions...).
+		WhereExecWorkingDir("/usr")
 
 	fnRunner, err := runner.Build()
 	if err != nil {
 		t.Errorf("Unexpected Error: %v", err)
 	}
+
 	OutRl, err := fnRunner.Execute()
 	if err != nil {
 		t.Errorf("Unexpected Error: %v", err)
 	}
+
 	expectedLabels := map[string]string{
 		"app-name": "my-app",
 		"env":      "dev",
 		"tier":     "frontend",
 		"app":      "guestbook",
 	}
-	assert.EqualValues(t, expectedLabels, OutRl.Items[1].GetLabels())
+	assert.EqualValues(t, expectedLabels, OutRl.Items[1].(*unstructured.Unstructured).GetLabels())
 }

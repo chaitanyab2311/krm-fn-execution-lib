@@ -1,9 +1,31 @@
 package fn
 
 import (
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"sigs.k8s.io/kustomize/kyaml/yaml"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/kustomize/kyaml/fn/framework"
 )
+
+type ResourceList struct {
+	// Items is the ResourceList.items input and output value.
+	//
+	// e.g. given the function input:
+	//
+	//    items:
+	//    - kind: Deployment
+	//      ...
+	//    - kind: Service
+	//      ...
+	//
+	// Items will be a slice containing the Deployment and Service resources
+	// Mutating functions will alter this field during processing.
+	// This field is required.
+	Items []runtime.Object
+
+	// Results is ResourceList.results output value.
+	// Validating functions can optionally use this field to communicate structured
+	// validation error data to downstream functions.
+	Results framework.Results
+}
 
 // Function specifies a KRM function to run.
 type Function struct {
@@ -22,23 +44,14 @@ type Function struct {
 	ConfigMap map[string]string `yaml:"configMap,omitempty" json:"configMap,omitempty"`
 }
 
-type FunctionRunner interface {
-	Execute() ([]*yaml.RNode, error)
-}
-
 type RunnerBuilder interface {
 	WithInput([]byte) RunnerBuilder
+	WithInputs(...runtime.Object) RunnerBuilder
 	WithFunctions(...Function) RunnerBuilder
+	WhereExecWorkingDir(string) RunnerBuilder
 	Build() (FunctionRunner, error)
 }
 
-type RunnerBuilderU interface {
-	WithInput([]byte) RunnerBuilderU
-	WithInputs(...unstructured.Unstructured) RunnerBuilderU
-	WithFunctions(...Function) RunnerBuilderU
-	Build() (FunctionRunnerU, error)
-}
-
-type FunctionRunnerU interface {
-	Execute() (unstructured.UnstructuredList, error)
+type FunctionRunner interface {
+	Execute() (ResourceList, error)
 }
